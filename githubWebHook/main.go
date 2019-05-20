@@ -10,8 +10,13 @@ import (
 	"path"
 	"sync"
 	"time"
+	kitlog "github.com/go-kit/kit/log"
+	loglevel "github.com/go-kit/kit/log/level"
 )
 
+var (
+	Logger = kitlog.NewLogfmtLogger(os.Stdout)
+)
 
 type Payload struct {
 	Repository struct {
@@ -36,15 +41,15 @@ func (hook *Hook) Handler(r *http.Request) bool {
 	if event == `ping` || event == `push` {
 		payload, err := hook.parsePayload(r.Body)
 		if err != nil {
-			fmt.Println(err)
+			loglevel.Error(Logger).Log(`msg`, fmt.Sprintf("Can't parse payload: '%s'", err.Error()))
 			return false
 		}
-		fmt.Printf("%s event received for repo %s\n", event, payload.Repository.Full_name)
-		//if event == `ping` { return true }
+		loglevel.Info(Logger).Log(`msg`, fmt.Sprintf("%s event received for repo %s\n", event, payload.Repository.Full_name))
+		if event == `ping` { return true }
 		go hook.Update(payload.Repository.Full_name)
 		return true
 	}
-	fmt.Printf("Unknown event '%s' received\n", event)
+	loglevel.Warn(Logger).Log(`msg`, fmt.Sprintf("Unknown event '%s' received\n", event))
 	return false
 }
 
@@ -57,7 +62,8 @@ func (hook *Hook) parsePayload(f io.Reader) (*Payload, error) {
 
 func (hook *Hook) Update(name string) {
 	hookTimestamp := time.Now()
-	fmt.Printf("Update %s\n", name)
+	loglevel.Info(Logger).Log(`msg`, fmt.Sprintf("Update %s\n", name))
+
 	repository, ok := hook.Repositories[name]
 	if !ok {
 		repository = new(Repository)
@@ -66,18 +72,18 @@ func (hook *Hook) Update(name string) {
 	repository.Mutex.Lock()
 	defer repository.Mutex.Unlock()
 	if repository.LastUpdate.After(hookTimestamp) {
-		fmt.Printf("Last Update: '%v', Hook Timestamp: '%v'\n", repository.LastUpdate, hookTimestamp)
+		loglevel.Debug(Logger).Log(`msg`, fmt.Sprintf("Last Update: '%v', Hook Timestamp: '%v'\n", repository.LastUpdate, hookTimestamp))
 		return
 	}
 	executerPath := path.Join(hook.ExecutorsPath, name)
 	if _, err := os.Stat(executerPath); os.IsNotExist(err) {
-		fmt.Printf("%s doesn't exist\n", executerPath)
+		loglevel.Warn(Logger).Log(`msg`, fmt.Sprintf("%s doesn't exist\n", executerPath))
 		return
 	}
 
 	cmd := exec.Command(executerPath)
 	if err := cmd.Run(); err != nil {
-		fmt.Println(err)
+		loglevel.Error(Logger).Log(`msg`, fmt.Sprintf("Script exec error: '%s'", err.Error()))
 	}
 
 	repository.LastUpdate = time.Now()
